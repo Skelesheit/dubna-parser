@@ -43,6 +43,7 @@ class GroupPairsScheduleModel(BaseModel):
 
 
 class ScheduleModel(BaseModel):
+    specializations_with_groups_from_file: Dict[str, List[GroupModel]]
     specializations: List[str]
     groups: List[GroupModel]
     classrooms: List[str]
