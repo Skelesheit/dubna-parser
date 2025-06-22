@@ -1,0 +1,1 @@
+from dubna_parser.parser import ScheduleParser

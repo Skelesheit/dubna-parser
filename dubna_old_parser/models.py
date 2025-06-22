@@ -1,6 +1,5 @@
-from typing import List, Optional, Union, Dict
-
 from pydantic import BaseModel
+from typing import List, Optional, Union, Dict, Set
 
 
 class GroupModel(BaseModel):
@@ -18,8 +17,12 @@ class PairModel(BaseModel):
     subject: str = 'undefined'
     teacher: str = 'undefined'
 
+
     def __str__(self):
         return f"{self.classroom} - {self.subject} - {self.teacher}"
+
+    def __hash__(self):
+        return hash(self.classroom + self.subject + self.teacher)
 
 
 # выше две базовые сущности
@@ -43,10 +46,10 @@ class GroupPairsScheduleModel(BaseModel):
 
 
 class ScheduleModel(BaseModel):
-    specializations_with_groups_from_file: Dict[str, List[GroupModel]]
-    specializations: List[str]
-    groups: List[GroupModel]
-    classrooms: List[str]
-    teachers: List[str]
-    subjects: List[str]
+    specializations_with_groups: Dict[str, List[GroupModel]]
+    specializations: Set[str]
+    groups: Set[GroupModel]
+    classrooms: Set[str]
+    teachers: Set[str]
+    subjects: Set[str]
     schedule_pairs: List[GroupPairsScheduleModel]

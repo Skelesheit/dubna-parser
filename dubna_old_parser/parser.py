@@ -6,9 +6,9 @@ from openpyxl.workbook import workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from pydantic import ValidationError
 
-from dubna_parser.downloader import download_sheets
-from dubna_parser.help_functions import join_dicts
-from dubna_parser.models import GroupModel, PairModel, AlternatingPairModel, SchedulePairModel, GroupPairsScheduleModel, \
+from dubna_old_parser.downloader import download_sheets
+from dubna_old_parser.help_functions import join_dicts
+from dubna_old_parser.models import GroupModel, PairModel, AlternatingPairModel, SchedulePairModel, GroupPairsScheduleModel, \
     ScheduleModel
 
 
@@ -293,16 +293,13 @@ class ScheduleParser:
                         self.pairs_of_groups.append(pair_of_group)
                     except ValidationError as e:
                         print(e)
-                        print("Данные: ")
-                        print(group)
-                        print(pairs_for_group)
 
                 specializations_with_groups_from_file = join_dicts(specializations_with_groups_from_file,
                                                                    specializations)
             self.specializations_with_groups = join_dicts(self.specializations_with_groups,
                                                           specializations_with_groups_from_file)
         schedule = ScheduleModel(
-            specializations_with_groups_from_file=self.specializations_with_groups,
+            specializations_with_groups=self.specializations_with_groups,
             specializations=self.specializations,
             groups=self.groups,
             classrooms=self.classrooms,

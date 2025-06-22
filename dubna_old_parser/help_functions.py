@@ -1,4 +1,4 @@
-def join_dicts(dict1: dict, dict2: dict):
+def join_dicts(dict1: dict, dict2: dict) -> dict:
     if (not dict1) and (not dict2):
         return dict()
     if not dict1:
