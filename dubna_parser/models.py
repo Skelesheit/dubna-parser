@@ -60,3 +60,4 @@ class Schedule:
     teachers: list[str] | set[str]
     subjects: list[str] | set[str]
     schedule_pairs: list[GroupPairs]
+    merged_pairs: dict[str, list[Group]]

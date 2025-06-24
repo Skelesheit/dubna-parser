@@ -1,14 +1,16 @@
 import os
 
 import openpyxl
+from openpyxl.cell import Cell
 from openpyxl.workbook.workbook import Workbook
+from openpyxl.worksheet.merge import MergedCellRange
 from openpyxl.worksheet.worksheet import Worksheet
 
 from dubna_parser import consts
 from dubna_parser.downloader import download_sheets
 from dubna_parser.enums import WeekDay, Type
 from dubna_parser.models import Group, Pair, AlternatingPair, SchedulePair, GroupPairs, Schedule
-from dubna_parser.utils import join_dicts, clean_spaces
+from dubna_parser.utils import join_dicts, clean_spaces, extract_rgb_key
 
 
 class ScheduleParser:
@@ -26,6 +28,11 @@ class ScheduleParser:
         self.subjects: set[str] = set()
         self.teachers: set[str] = set()
         self.all_specializations: set[str] = set()
+        self.groups_from_row: list[Group] = list()
+        self.group_parse_row_idx: int = 4
+        self.group_parse_col_idx: int = 1
+        self.group_parse_col_width: int = 2
+        self.merged_pairs: dict[str, list[Group]] = dict()
 
     def set_default(self):
         self.wb = None
@@ -38,6 +45,8 @@ class ScheduleParser:
         self.subjects: set[str] = set()
         self.teachers: set[str] = set()
         self.all_specializations: set[str] = set()
+        self.groups_from_row: list[Group] = list()
+        self.merged_pairs = dict()
 
     # методы для моделей
     def get_model_pair(self, classroom: str, subject: str, teacher: str, type_: Type) -> Pair:
@@ -45,6 +54,12 @@ class ScheduleParser:
         self.subjects.add(subject)
         self.teachers.add(teacher)
         return Pair(classroom=classroom, subject=subject, teacher=teacher, type_=type_)
+
+    def add_merged_pair(self, value: str, crange: MergedCellRange) -> None:
+        merge_min_col_idx, merge_max_col_idx = (crange.min_col - self.group_parse_col_idx * self.group_parse_col_width,
+                                                crange.max_col - self.group_parse_col_idx * self.group_parse_col_width)
+        merge_groups = self.groups_from_row[merge_min_col_idx-1:merge_max_col_idx]
+        self.merged_pairs[value] = merge_groups
 
     def serialize_group(self, group, specialization: str) -> Group:
         group_number = 0
@@ -70,6 +85,7 @@ class ScheduleParser:
     def get_specializations_from_row(self, index_start=3,
                                      index_end=3, index_row=4) -> dict[str, list[Group]]:
         groups: dict[str, list[Group]] = dict()
+        self.groups_from_row = list()
         for col in self.ws.iter_cols(min_col=index_start, max_col=index_end,
                                      min_row=index_row, max_row=index_row,
                                      values_only=True):
@@ -83,7 +99,7 @@ class ScheduleParser:
                     group = group_with_specialization[0]
 
                     group = self.serialize_group(group, specialization)
-
+                    self.groups_from_row.append(group)
                     if specialization in groups:
                         groups[specialization].append(group)
                     else:
@@ -100,8 +116,11 @@ class ScheduleParser:
                 day_indices[self.ws.cell(row=min_row, column=min_col).value] = (min_row, max_row)
         return day_indices
 
-    def get_pair_from_row(self, row: str) -> Pair:
-        row = clean_spaces(row.replace('/', ''))
+    def get_pair_from_row(self, row_cell: Cell, row_value: str | None) -> Pair:
+        if row_value is None:
+            row = clean_spaces(row_cell.value.replace('/', ''))
+        else:
+            row = row_value
         for degree in self.degrees:
             row = row.replace(degree, '').strip()
         classroom = ''
@@ -123,64 +142,69 @@ class ScheduleParser:
                 space_count += 1
         teacher = teacher[::-1].strip()
         subject = clean_spaces(row.replace(teacher, '').replace(classroom, ''))
-        return self.get_model_pair(classroom, subject, teacher)
+        return self.get_model_pair(classroom, subject, teacher,
+                                   consts.color_to_type.get(extract_rgb_key(row_cell), Type.SEMINAR))
 
-    def get_rows(self, column_index, first_row_index, second_row_index) -> tuple[str, str]:
+    def get_rows(self, column_index, first_row_index, second_row_index) -> tuple[Cell, Cell]:
         row1, row2 = '', ''
         for crange in self.ws.merged_cells.ranges:
             if row1 and row2:
                 break
             min_col, min_row, max_col, max_row = crange.bounds
             if min_col <= column_index <= max_col and min_row == first_row_index:
-                row1 = self.ws.cell(row=min_row, column=min_col).value
+                row1 = self.ws.cell(row=min_row, column=min_col)
+                self.add_merged_pair(row1.value, crange)
             if min_col <= column_index <= max_col and min_row == second_row_index:
-                row2 = self.ws.cell(row=min_row, column=min_col).value
+                row2 = self.ws.cell(row=min_row, column=min_col)
+                self.add_merged_pair(row2.value, crange)
         else:
             if row1:
-                row2 = self.ws.cell(row=second_row_index, column=column_index).value
+                row2 = self.ws.cell(row=second_row_index, column=column_index)
             elif row2:
-                row1 = self.ws.cell(row=first_row_index, column=column_index).value
+                row1 = self.ws.cell(row=first_row_index, column=column_index)
             else:
-                row1 = self.ws.cell(row=first_row_index, column=column_index).value
-                row2 = self.ws.cell(row=second_row_index, column=column_index).value
+                row1 = self.ws.cell(row=first_row_index, column=column_index)
+                row2 = self.ws.cell(row=second_row_index, column=column_index)
         return row1, row2
 
-    def get_single_row(self, column_index, row_index) -> str:
+    def get_single_row(self, column_index, row_index) -> Cell:
         row = ''
         for crange in self.ws.merged_cells.ranges:
             if row:
                 break
             min_col, min_row, max_col, max_row = crange.bounds
             if min_col <= column_index <= max_col and min_row == row_index:
-                row = self.ws.cell(row=min_row, column=min_col).value
+                row = self.ws.cell(row=min_row, column=min_col)
+                self.add_merged_pair(row, crange)
         else:
-            row = self.ws.cell(row=row_index, column=column_index).value
+            row = self.ws.cell(row=row_index, column=column_index)
         return row
 
-    def get_pair(self, row1, row2) -> Pair | AlternatingPair | None:
+    def get_pair(self, row_cell_1: Cell, row_cell_2: Cell) -> Pair | AlternatingPair | None:
         pair = None
+        row1, row2 = row_cell_1.value, row_cell_2.value
         if row1 == 'с/к Олимп':
             classroom = row1
             subject = row2
             teacher = 'undefined'
-            pair = Pair(classroom=classroom, subject=subject, teacher=teacher)
+            pair = Pair(classroom=classroom, subject=subject, teacher=teacher, type_=Type.PHYSICAL)
         elif row1 and row2:
             if row1.count('/') >= 1 and row2.count('/') >= 1:
-                pair1 = self.get_pair_from_row(row1)
-                pair2 = self.get_pair_from_row(row2)
+                pair1 = self.get_pair_from_row(row_cell_1, row1)
+                pair2 = self.get_pair_from_row(row_cell_2, row2)
                 pair = AlternatingPair(odd_week=pair1, even_week=pair2)
                 # пара мигалка
             else:
                 row = row1 + '  ' + row2
-                pair = self.get_pair_from_row(row)
+                pair = self.get_pair_from_row(row_cell_1, row)
         elif row1:
-            pair1 = self.get_pair_from_row(row1)
+            pair1 = self.get_pair_from_row(row_cell_1, row1)
             if row1.count('/') == 0:
                 pair = pair1
             if row1.count('/') > 0:
                 pair = AlternatingPair(odd_week=pair1, even_week=None)
         elif row2:
-            pair2 = self.get_pair_from_row(row2)
+            pair2 = self.get_pair_from_row(row_cell_2, row2)
             if row2.count('/') == 0:
                 pair = pair2
             if row2.count('/') > 0:
@@ -189,22 +213,24 @@ class ScheduleParser:
             pair = None
         return pair
 
-    def get_single_pair(self, row) -> Pair | AlternatingPair | None:
+    def get_single_pair(self, row_cell: Cell) -> Pair | AlternatingPair | None:
         pair = None
+        row = row_cell.value
         if row:
             row.strip()
             if row.count('/') == 0:
-                pair = self.get_pair_from_row(row)
+                pair = self.get_pair_from_row(row_cell, row)
             else:
                 if row[0] == '/':
-                    pair2 = self.get_pair_from_row(row)
+                    pair2 = self.get_pair_from_row(row_cell, row)
                     pair = AlternatingPair(odd_week=None, even_week=pair2)
                 elif row[-1] == '/':
-                    pair1 = self.get_pair_from_row(row)
+                    pair1 = self.get_pair_from_row(row_cell, row)
                     pair = AlternatingPair(odd_week=pair1, even_week=None)
                 else:
                     print("тут уже мне неизвестно как парсить...")
         return pair
+
 
     def get_pairs_for_group(self, indices_of_week, column_index: int) -> dict[WeekDay, list[SchedulePair]]:
         group_pairs: dict[WeekDay, list[SchedulePair]] = dict()
@@ -234,7 +260,7 @@ class ScheduleParser:
                 group_pairs[expected_day] = pairs_for_day
         return group_pairs
 
-    def parse(self, save_folder: str, get_set = False) -> Schedule:
+    def parse(self, save_folder: str, get_set=False) -> Schedule:
         """перед парсингом не открывать таблицы! Ничего не трогать!"""
         self.set_default()
         all_files = os.listdir(save_folder)
@@ -271,7 +297,8 @@ class ScheduleParser:
                 classrooms=self.classrooms,
                 teachers=self.teachers,
                 subjects=self.subjects,
-                schedule_pairs=self.pairs_of_groups
+                schedule_pairs=self.pairs_of_groups,
+                merged_pairs=self.merged_pairs,
             )
         return Schedule(
             specializations_with_groups_from_file=self.specializations_with_groups,
@@ -280,5 +307,6 @@ class ScheduleParser:
             classrooms=list(self.classrooms),
             teachers=list(self.teachers),
             subjects=list(self.subjects),
-            schedule_pairs=self.pairs_of_groups
+            schedule_pairs=self.pairs_of_groups,
+            merged_pairs=self.merged_pairs,
         )

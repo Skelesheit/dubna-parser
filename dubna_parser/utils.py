@@ -1,5 +1,18 @@
 import re
 
+from openpyxl.cell import Cell
+
+
+def extract_rgb_key(cell: Cell) -> str | None:
+    fill = cell.fill
+    if fill is None or fill.fill_type != "solid":
+        return None
+
+    color = fill.fgColor
+    if color.type == "rgb" and color.rgb is not None:
+        return color.rgb.upper()
+    return None
+
 
 def clean_spaces(s: str) -> str:
     # Убираем лишние пробелы внутри строки
